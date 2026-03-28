@@ -1,6 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { useEffect } from "react";
 import { UserPlus, Search, Filter } from "lucide-react";
 
 export default function Students() {
@@ -9,10 +8,73 @@ export default function Students() {
   const [modal, setModal] = useState(false);
   const [students, setStudents] = useState([]);
 
+  const [courseFilter, setCourseFilter] = useState<string>("");
+  const [yearFilter, setYearFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("");
+
+  const courses = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of students as any[]) {
+      const c = String((s as any)?.branch ?? "").trim();
+      if (c) set.add(c);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [students]);
+
+  const years = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of students as any[]) {
+      const yRaw = (s as any)?.year;
+      if (yRaw === null || yRaw === undefined || yRaw === "") continue;
+      set.add(String(yRaw));
+    }
+    return Array.from(set).sort((a, b) => Number(a) - Number(b));
+  }, [students]);
+
+  const filteredStudents = useMemo(() => {
+    const q = search.toLowerCase().trim();
+
+    return (students as any[]).filter((student: any) => {
+      const id = String(student.id ?? "");
+      const name = String(student.name ?? "");
+      const course = String(student.branch ?? "");
+      const year = String(student.year ?? "");
+      const roomRaw = String(student.room ?? "");
+      const hostelRaw = String(student.block ?? "");
+      const room = roomRaw === "—" ? "" : roomRaw;
+      const hostelName = hostelRaw === "—" ? "" : hostelRaw;
+      const blockNo = student?.block_no;
+      const derivedBlockLabel = hostelName
+        ? hostelName
+        : blockNo === null || blockNo === undefined || String(blockNo).trim() === ""
+          ? ""
+          : `Block ${String(blockNo).trim()}`;
+
+      const hostel = derivedBlockLabel;
+
+      const hostelStatus = room && hostel ? "active" : "inactive";
+
+      const matchesSearch =
+        q === "" ||
+        id.toLowerCase().includes(q) ||
+        name.toLowerCase().includes(q) ||
+        course.toLowerCase().includes(q) ||
+        year.toLowerCase().includes(q) ||
+        room.toLowerCase().includes(q) ||
+        hostel.toLowerCase().includes(q);
+
+      const matchesCourse = courseFilter === "" || course === courseFilter;
+      const matchesYear = yearFilter === "" || year === yearFilter;
+      const matchesStatus = statusFilter === "" || hostelStatus === statusFilter;
+
+      return matchesSearch && matchesCourse && matchesYear && matchesStatus;
+    });
+  }, [students, search, courseFilter, yearFilter, statusFilter]);
+
   useEffect(() => {
     fetch("http://127.0.0.1:5000/students")
       .then(res => res.json())
-      .then(data => setStudents(data))
+      .then(data => setStudents(Array.isArray(data) ? data : []))
       .catch(err => console.error(err));
   }, []);
 
@@ -28,7 +90,7 @@ export default function Students() {
 
   return (
     <div className="space-y-4 animate-in fade-in duration-300">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 flex-wrap">
         <div className="relative flex-1 max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <input
@@ -38,10 +100,53 @@ export default function Students() {
             className="w-full h-9 pl-9 pr-3 rounded-md border border-border bg-card text-xs outline-none focus:border-primary transition-colors"
           />
         </div>
-        <button className="flex items-center gap-2 h-9 px-3 rounded-md border border-border text-xs text-muted-foreground hover:border-primary/40 transition-colors">
+
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="h-9 px-3 rounded-md border border-border bg-card text-xs text-foreground outline-none focus:border-primary transition-colors"
+        >
+          <option value="">All Status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+
+        <select
+          value={yearFilter}
+          onChange={(e) => setYearFilter(e.target.value)}
+          className="h-9 px-3 rounded-md border border-border bg-card text-xs text-foreground outline-none focus:border-primary transition-colors"
+        >
+          <option value="">All Years</option>
+          {years.map((y) => (
+            <option key={y} value={y}>{y}</option>
+          ))}
+        </select>
+
+        <select
+          value={courseFilter}
+          onChange={(e) => setCourseFilter(e.target.value)}
+          className="h-9 px-3 rounded-md border border-border bg-card text-xs text-foreground outline-none focus:border-primary transition-colors"
+        >
+          <option value="">All Courses</option>
+          {courses.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+
+        <button
+          type="button"
+          onClick={() => {
+            setStatusFilter("");
+            setYearFilter("");
+            setCourseFilter("");
+          }}
+          className="flex items-center gap-2 h-9 px-3 rounded-md border border-border text-xs text-muted-foreground hover:border-primary/40 transition-colors"
+          title="Clear filters"
+        >
           <Filter className="w-3.5 h-3.5" />
-          Filter
+          Clear
         </button>
+
         <button
           onClick={() => setModal(true)}
           className="flex items-center gap-2 h-9 px-4 rounded-md text-xs font-medium text-white hover:opacity-90 active:scale-[0.98] transition-all ml-auto"
@@ -56,26 +161,43 @@ export default function Students() {
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-muted/50 border-b border-border">
-              {["Student ID", "Name", "Course & Year", "Room / Block", "Hostel", "Status", ""].map((h) => (
+              {["Student ID", "Name", "Registration Number", "Course", "Year", "Hostel Status", "Status", ""].map((h) => (
                 <th key={h} className="text-left font-semibold text-muted-foreground px-4 py-3 first:pl-5 last:pr-5">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {students.length === 0 ? (
+            {filteredStudents.length === 0 ? (
               <tr>
-                <td colSpan={7} className="text-center py-16 text-xs text-muted-foreground">
-                  Loading students...
+                <td colSpan={8} className="text-center py-16 text-xs text-muted-foreground">
+                  {students.length === 0 ? "Loading students..." : "No students match your search."}
                 </td>
               </tr>
             ) : (
-              students.map((s: any) => (
+              filteredStudents.map((s: any) => (
                 <tr key={s.id} className="border-b border-border">
                   <td className="px-4 py-3">{s.id}</td>
                   <td className="px-4 py-3">{s.name}</td>
-                  <td className="px-4 py-3">{s.branch} - Year {s.year}</td>
-                  <td className="px-4 py-3">{s.room}</td>
-                  <td className="px-4 py-3">{s.block}</td>
+                  <td className="px-4 py-3">{s.id || '—'}</td>
+                  <td className="px-4 py-3">{s.branch || '—'}</td>
+                  <td className="px-4 py-3">{s.year ?? '—'}</td>
+                  <td className="px-4 py-3">
+                    {(() => {
+                      const room = s.room === "—" ? "" : String(s.room ?? "").trim();
+                      const blockName = s.block === "—" ? "" : String(s.block ?? "").trim();
+                      const blockNo = s?.block_no;
+                      const blockLabel = blockName
+                        ? blockName
+                        : blockNo === null || blockNo === undefined || String(blockNo).trim() === ""
+                          ? ""
+                          : `Block ${String(blockNo).trim()}`;
+
+                      if (room && blockLabel) return `${room}, ${blockLabel}`;
+                      if (room) return room;
+                      if (blockLabel) return blockLabel;
+                      return "Not Allocated";
+                    })()}
+                  </td>
                   <td className="px-4 py-3">Active</td>
                   <td className="px-4 py-3"></td>
                 </tr>

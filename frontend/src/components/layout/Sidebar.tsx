@@ -31,45 +31,85 @@ const studentLinks = [
 
 interface SidebarProps {
   onClose: () => void;
+  collapsed?: boolean;
+  onToggle: () => void;
 }
 
-export default function Sidebar({ onClose }: SidebarProps) {
+export default function Sidebar({ onClose, collapsed = false, onToggle }: SidebarProps) {
   const { user, logout, isAdmin } = useAuth();
   const location = useLocation();
   const links = isAdmin ? adminLinks : studentLinks;
 
   return (
     <aside
-      className="flex flex-col h-full w-60 select-none"
+      className={`flex flex-col h-full select-none transition-all duration-300 ${
+        collapsed ? "w-16" : "w-60"
+      }`}
       style={{ backgroundColor: "hsl(var(--sidebar-background))" }}
     >
       {/* Logo */}
       <div
-        className="flex items-center h-16 px-5 gap-3 border-b flex-shrink-0"
+        className={
+          "flex items-center h-16 gap-3 border-b flex-shrink-0 " +
+          (collapsed ? "px-3 justify-center" : "px-4")
+        }
         style={{ borderColor: "hsl(var(--sidebar-border))" }}
       >
-        <div
-          className="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0"
-          style={{ backgroundColor: "hsl(var(--primary))" }}
-        >
-          <Building2 className="w-4 h-4 text-white" />
-        </div>
-        <span
-          className="font-semibold text-base tracking-tight"
+        <button
+          onClick={onToggle}
+          className={
+            "group relative p-2 rounded-lg transition-colors hover:bg-sidebar-accent flex-shrink-0 " +
+            (collapsed ? "" : "mr-1")
+          }
           style={{ color: "hsl(var(--sidebar-foreground))" }}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand" : "Collapse"}
         >
-          HostelHub
-        </span>
+          <div className="w-5 h-4 relative flex flex-col justify-center items-center">
+            <span
+              className="absolute w-4 h-0.5 rounded-full bg-current transition-all duration-300 ease-in-out"
+              style={{
+                transform: collapsed ? "translateY(-6px)" : "rotate(45deg)",
+                opacity: 0.9,
+              }}
+            />
+            <span
+              className="absolute w-4 h-0.5 rounded-full bg-current transition-all duration-300 ease-in-out"
+              style={{
+                transform: collapsed ? "translateY(0)" : "rotate(-45deg)",
+                opacity: collapsed ? 0.9 : 0.9,
+              }}
+            />
+            <span
+              className="absolute w-4 h-0.5 rounded-full bg-current transition-all duration-300 ease-in-out"
+              style={{
+                transform: collapsed ? "translateY(6px)" : "rotate(45deg)",
+                opacity: collapsed ? 0.9 : 0,
+              }}
+            />
+          </div>
+        </button>
+
+        {!collapsed && (
+          <span
+            className="font-semibold text-base tracking-tight"
+            style={{ color: "hsl(var(--sidebar-foreground))" }}
+          >
+            HostelHub
+          </span>
+        )}
       </div>
 
       {/* Nav */}
       <nav className="flex-1 py-4 overflow-y-auto">
-        <p
-          className="text-[10px] font-semibold uppercase tracking-widest px-5 mb-2"
-          style={{ color: "hsl(220,10%,40%)" }}
-        >
-          {isAdmin ? "Administration" : "My Portal"}
-        </p>
+        {!collapsed && (
+          <p
+            className="text-[10px] font-semibold uppercase tracking-widest px-5 mb-2"
+            style={{ color: "hsl(220,10%,40%)" }}
+          >
+            {isAdmin ? "Administration" : "My Portal"}
+          </p>
+        )}
         <ul className="space-y-0.5 px-2">
           {links.map(({ to, icon: Icon, label }) => {
             const active =
@@ -79,20 +119,23 @@ export default function Sidebar({ onClose }: SidebarProps) {
               <li key={to}>
                 <NavLink
                   to={to}
-                  onClick={onClose}
                   className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-150",
-                    active ? "text-white" : "hover:bg-sidebar-accent"
+                    "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200",
+                    active ? "text-white" : "hover:bg-sidebar-accent",
+                    collapsed && "justify-center px-2"
                   )}
                   style={active ? { backgroundColor: "hsl(var(--primary))" } : {}}
+                  title={collapsed ? label : undefined}
                 >
                   <Icon
                     className="w-4 h-4 flex-shrink-0"
                     style={{ color: active ? "white" : "hsl(var(--sidebar-foreground))" }}
                   />
-                  <span style={{ color: active ? "white" : "hsl(var(--sidebar-foreground))" }}>
-                    {label}
-                  </span>
+                  {!collapsed && (
+                    <span style={{ color: active ? "white" : "hsl(var(--sidebar-foreground))" }}>
+                      {label}
+                    </span>
+                  )}
                 </NavLink>
               </li>
             );
@@ -105,24 +148,20 @@ export default function Sidebar({ onClose }: SidebarProps) {
         className="border-t flex-shrink-0"
         style={{ borderColor: "hsl(var(--sidebar-border))" }}
       >
-        <div className="flex items-center gap-3 px-4 py-4">
-          <div
-            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-            style={{ backgroundColor: "hsl(var(--primary))", color: "white" }}
-          >
-            {user?.avatar}
-          </div>
-          <div className="overflow-hidden flex-1">
-            <p
-              className="text-xs font-medium truncate"
-              style={{ color: "hsl(var(--sidebar-foreground))" }}
-            >
-              {user?.name}
-            </p>
-            <p className="text-[10px] capitalize" style={{ color: "hsl(220,10%,42%)" }}>
-              {user?.role}
-            </p>
-          </div>
+        <div className={`flex items-center gap-3 px-4 py-4 ${collapsed ? "justify-center" : ""}`}>
+          {!collapsed && (
+            <div className="overflow-hidden flex-1">
+              <p
+                className="text-xs font-medium truncate"
+                style={{ color: "hsl(var(--sidebar-foreground))" }}
+              >
+                {user?.name}
+              </p>
+              <p className="text-[10px] capitalize" style={{ color: "hsl(220,10%,42%)" }}>
+                {user?.role}
+              </p>
+            </div>
+          )}
           <button
             onClick={logout}
             className="flex-shrink-0 p-1.5 rounded-md transition-colors hover:bg-sidebar-accent"

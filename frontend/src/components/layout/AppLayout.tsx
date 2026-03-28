@@ -19,6 +19,8 @@ export default function AppLayout() {
   const location = useLocation();
   const pageTitle = PAGE_TITLES[location.pathname] ?? "HostelHub";
 
+  const toggleSidebar = () => setSidebarOpen((o) => !o);
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Backdrop — only on small screens when sidebar is open */}
@@ -31,17 +33,22 @@ export default function AppLayout() {
 
       {/* Sidebar */}
       <div
-        className="fixed inset-y-0 left-0 z-50 lg:static lg:z-auto flex-shrink-0 sidebar-transition overflow-hidden"
-        style={{ width: sidebarOpen ? "240px" : "0px" }}
+        className={`fixed inset-y-0 left-0 z-50 lg:static lg:z-auto flex-shrink-0 sidebar-transition overflow-hidden border-r ${
+          sidebarOpen ? "w-60" : "w-16"
+        }`}
+        style={{ borderColor: "hsl(var(--sidebar-border))" }}
       >
-        <Sidebar onClose={() => setSidebarOpen(false)} />
+        <Sidebar 
+          onClose={() => setSidebarOpen(false)} 
+          collapsed={!sidebarOpen}
+          onToggle={toggleSidebar}
+        />
       </div>
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <TopNav
           sidebarOpen={sidebarOpen}
-          onMenuClick={() => setSidebarOpen((o) => !o)}
           pageTitle={pageTitle}
         />
         <main className="flex-1 overflow-y-auto p-6">

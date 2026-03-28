@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Plus, Search } from "lucide-react";
 
@@ -6,6 +6,25 @@ export default function WaitingList() {
   const { isAdmin } = useAuth();
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(false);
+  const [waitingList, setWaitingList] = useState([]);
+
+  useEffect(() => {
+    fetch("http://127.0.0.1:5000/waiting-list")
+      .then(res => res.json())
+      .then(data => setWaitingList(Array.isArray(data) ? data : []))
+      .catch(err => console.error(err));
+  }, []);
+
+  const filteredList = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return waitingList.filter((item: any) =>
+      q === "" ||
+      String(item.student_id ?? "").toLowerCase().includes(q) ||
+      String(item.course ?? "").toLowerCase().includes(q) ||
+      String(item.preferred_hostel ?? "").toLowerCase().includes(q) ||
+      String(item.preferred_room_type ?? "").toLowerCase().includes(q)
+    );
+  }, [waitingList, search]);
 
   return (
     <div className="space-y-4 animate-in fade-in duration-300">
@@ -31,7 +50,7 @@ export default function WaitingList() {
 
       <div className="bg-card rounded-lg border border-border shadow-sm overflow-hidden">
         <div className="px-5 py-3 bg-muted/30 border-b border-border">
-          <span className="text-xs font-semibold text-foreground">0 students waiting</span>
+          <span className="text-xs font-semibold text-foreground">{waitingList.length} students waiting</span>
         </div>
         <table className="w-full text-xs">
           <thead>
@@ -42,11 +61,25 @@ export default function WaitingList() {
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td colSpan={7} className="text-center py-16 text-xs text-muted-foreground">
-                Waiting list is empty. Connect a database to load data.
-              </td>
-            </tr>
+            {filteredList.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="text-center py-16 text-xs text-muted-foreground">
+                  {waitingList.length === 0 ? "Waiting list is empty. Connect a database to load data." : "No entries match your search."}
+                </td>
+              </tr>
+            ) : (
+              filteredList.map((item: any, idx) => (
+                <tr key={idx} className="border-b border-border">
+                  <td className="px-4 py-3">{idx + 1}</td>
+                  <td className="px-4 py-3">{item.student_id || '—'}</td>
+                  <td className="px-4 py-3">{item.course || '—'}</td>
+                  <td className="px-4 py-3">{item.preferred_hostel || '—'}</td>
+                  <td className="px-4 py-3">{item.preferred_room_type || '—'}</td>
+                  <td className="px-4 py-3">{item.applied_on ? new Date(item.applied_on).toLocaleDateString() : '—'}</td>
+                  {isAdmin && <td className="px-4 py-3"></td>}
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

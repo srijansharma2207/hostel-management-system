@@ -14,23 +14,20 @@ export default function Login() {
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [stats, setStats] = useState({
-    total_students: 1240,
-    total_hostels: 6,
-    occupancy_percentage: 98.2
-  });
+  const [stats, setStats] = useState<{
+    total_students?: number;
+    total_hostels?: number;
+    occupancy_percentage?: number;
+  } | null>(null);
 
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        console.log("Fetching dashboard stats...");
         const response = await fetch("http://127.0.0.1:5000/dashboard-stats");
         const data = await response.json();
-        console.log("Dashboard stats received:", data);
         setStats(data);
       } catch (err) {
-        console.log("Using fallback stats:", err);
-        // Keep default values if backend is not available
+        setStats(null);
       }
     };
     
@@ -84,9 +81,18 @@ export default function Login() {
 
         <div className="grid grid-cols-3 gap-4">
           {[
-            { val: stats.total_students.toLocaleString(), label: "Students" },
-            { val: stats.total_hostels.toString(), label: "Hostels" },
-            { val: `${stats.occupancy_percentage}%`, label: "Occupancy" },
+            {
+              val: stats?.total_students != null ? stats.total_students.toLocaleString() : "—",
+              label: "Students",
+            },
+            {
+              val: stats?.total_hostels != null ? String(stats.total_hostels) : "—",
+              label: "Hostels",
+            },
+            {
+              val: stats?.occupancy_percentage != null ? `${stats.occupancy_percentage}%` : "—",
+              label: "Occupancy",
+            },
           ].map((s) => (
             <div key={s.label} className="rounded-md p-4" style={{ backgroundColor: "hsl(220,15%,17%)" }}>
               <p className="text-2xl font-semibold text-white mb-0.5">{s.val}</p>

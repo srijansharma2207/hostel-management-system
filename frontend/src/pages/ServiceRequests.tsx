@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Plus, Search } from "lucide-react";
 
@@ -6,6 +6,40 @@ export default function ServiceRequests() {
   const { isAdmin } = useAuth();
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(false);
+  const [requests, setRequests] = useState([]);
+
+  useEffect(() => {
+    // Fetch service requests from backend - would need /service-requests endpoint
+    fetch("http://127.0.0.1:5000/debug-export")
+      .then(res => res.json())
+      .then(data => {
+        // For now, show sample data
+        const sampleRequests = [
+          { id: 1, type: "Plumbing", student: "John Doe", room: "A-101", description: "Leaking faucet", priority: "Medium", date: "2024-01-15", status: "Pending" },
+          { id: 2, type: "Electrical", student: "Jane Smith", room: "B-203", description: "Lights not working", priority: "High", date: "2024-01-16", status: "In Progress" },
+          { id: 3, type: "Cleaning", student: "Mike Johnson", room: "C-305", description: "Room cleaning request", priority: "Low", date: "2024-01-17", status: "Resolved" },
+        ];
+        setRequests(Array.isArray(sampleRequests) ? sampleRequests : []);
+      })
+      .catch(err => console.error(err));
+  }, []);
+
+  const filteredRequests = useMemo(() => requests.filter((request: any) => 
+    String(request.type ?? "").toLowerCase().includes(search.toLowerCase()) ||
+    String(request.student ?? "").toLowerCase().includes(search.toLowerCase()) ||
+    String(request.room ?? "").toLowerCase().includes(search.toLowerCase()) ||
+    String(request.description ?? "").toLowerCase().includes(search.toLowerCase())
+  ), [requests, search]);
+
+  const statusCounts = useMemo(() => {
+    const counts = { pending: 0, inProgress: 0, resolved: 0 };
+    requests.forEach((req: any) => {
+      if (req.status === "Pending") counts.pending++;
+      else if (req.status === "In Progress") counts.inProgress++;
+      else if (req.status === "Resolved") counts.resolved++;
+    });
+    return counts;
+  }, [requests]);
 
   return (
     <div className="space-y-4 animate-in fade-in duration-300">
@@ -32,9 +66,9 @@ export default function ServiceRequests() {
       {isAdmin && (
         <div className="grid grid-cols-3 gap-4">
           {[
-            { label: "Pending", count: "—" },
-            { label: "In Progress", count: "—" },
-            { label: "Resolved", count: "—" },
+            { label: "Pending", count: statusCounts.pending },
+            { label: "In Progress", count: statusCounts.inProgress },
+            { label: "Resolved", count: statusCounts.resolved },
           ].map((s) => (
             <div key={s.label} className="bg-card rounded-lg border border-border p-4 shadow-sm text-center">
               <p className="text-2xl font-semibold text-foreground">{s.count}</p>
@@ -54,11 +88,43 @@ export default function ServiceRequests() {
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td colSpan={7} className="text-center py-16 text-xs text-muted-foreground">
-                No service requests yet. Connect a database to load data.
-              </td>
-            </tr>
+            {filteredRequests.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="text-center py-16 text-xs text-muted-foreground">
+                  {requests.length === 0 ? "No service requests yet. Connect a database to load data." : "No requests match your search."}
+                </td>
+              </tr>
+            ) : (
+              filteredRequests.map((request: any) => {
+                const statusColor = request.status === "Pending" ? "bg-yellow-100 text-yellow-700" :
+                                  request.status === "In Progress" ? "bg-blue-100 text-blue-700" :
+                                  "bg-green-100 text-green-700";
+                
+                return (
+                  <tr key={request.id} className="border-b border-border">
+                    <td className="px-4 py-3">{request.id}</td>
+                    <td className="px-4 py-3">{request.type}</td>
+                    <td className="px-4 py-3">{isAdmin ? `${request.student} / ${request.room}` : request.room}</td>
+                    <td className="px-4 py-3">{request.description}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 text-xs font-medium rounded ${
+                        request.priority === "High" ? "bg-red-100 text-red-700" :
+                        request.priority === "Medium" ? "bg-orange-100 text-orange-700" :
+                        "bg-gray-100 text-gray-700"
+                      }`}>
+                        {request.priority}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">{request.date}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 text-xs font-medium rounded ${statusColor}`}>
+                        {request.status}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
