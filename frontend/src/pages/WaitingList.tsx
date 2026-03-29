@@ -3,7 +3,7 @@ import { useAuth } from "@/context/AuthContext";
 import { Plus, Search } from "lucide-react";
 
 export default function WaitingList() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(false);
   const [waitingList, setWaitingList] = useState([]);
@@ -17,14 +17,18 @@ export default function WaitingList() {
 
   const filteredList = useMemo(() => {
     const q = search.toLowerCase().trim();
-    return waitingList.filter((item: any) =>
+    const mine = isAdmin
+      ? waitingList
+      : waitingList.filter((item: any) => String(item.student_id) === String(user?.studentId));
+
+    return mine.filter((item: any) =>
       q === "" ||
       String(item.student_id ?? "").toLowerCase().includes(q) ||
       String(item.course ?? "").toLowerCase().includes(q) ||
       String(item.preferred_hostel ?? "").toLowerCase().includes(q) ||
       String(item.preferred_room_type ?? "").toLowerCase().includes(q)
     );
-  }, [waitingList, search]);
+  }, [isAdmin, user?.studentId, waitingList, search]);
 
   return (
     <div className="space-y-4 animate-in fade-in duration-300">
@@ -38,24 +42,26 @@ export default function WaitingList() {
             className="w-full h-9 pl-9 pr-3 rounded-md border border-border bg-card text-xs outline-none focus:border-primary transition-colors"
           />
         </div>
-        <button
-          onClick={() => setModal(true)}
-          className="flex items-center gap-2 h-9 px-4 rounded-md text-xs font-medium text-white hover:opacity-90 active:scale-[0.98] transition-all ml-auto"
-          style={{ backgroundColor: "hsl(var(--primary))" }}
-        >
-          <Plus className="w-3.5 h-3.5" />
-          {isAdmin ? "Add to Waiting List" : "Apply for Hostel"}
-        </button>
+        {!isAdmin && (
+          <button
+            onClick={() => setModal(true)}
+            className="flex items-center gap-2 h-9 px-4 rounded-md text-xs font-medium text-white hover:opacity-90 active:scale-[0.98] transition-all ml-auto"
+            style={{ backgroundColor: "hsl(var(--primary))" }}
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Apply for Hostel
+          </button>
+        )}
       </div>
 
       <div className="bg-card rounded-lg border border-border shadow-sm overflow-hidden">
         <div className="px-5 py-3 bg-muted/30 border-b border-border">
-          <span className="text-xs font-semibold text-foreground">{waitingList.length} students waiting</span>
+          <span className="text-xs font-semibold text-foreground">{filteredList.length} students waiting</span>
         </div>
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-muted/50 border-b border-border">
-              {["#", "Student", "Course", "Hostel Preference", "Room Preference", "Applied On", isAdmin ? "Actions" : ""].map((h, i) => (
+              {["#", "Student ID", "Course", "Hostel Preference", "Room Preference", "Applied On"].map((h, i) => (
                 <th key={i} className="text-left font-semibold text-muted-foreground px-4 py-3 first:pl-5 last:pr-5">{h}</th>
               ))}
             </tr>
@@ -63,7 +69,7 @@ export default function WaitingList() {
           <tbody>
             {filteredList.length === 0 ? (
               <tr>
-                <td colSpan={7} className="text-center py-16 text-xs text-muted-foreground">
+                <td colSpan={6} className="text-center py-16 text-xs text-muted-foreground">
                   {waitingList.length === 0 ? "Waiting list is empty. Connect a database to load data." : "No entries match your search."}
                 </td>
               </tr>
@@ -76,7 +82,6 @@ export default function WaitingList() {
                   <td className="px-4 py-3">{item.preferred_hostel || '—'}</td>
                   <td className="px-4 py-3">{item.preferred_room_type || '—'}</td>
                   <td className="px-4 py-3">{item.applied_on ? new Date(item.applied_on).toLocaleDateString() : '—'}</td>
-                  {isAdmin && <td className="px-4 py-3"></td>}
                 </tr>
               ))
             )}

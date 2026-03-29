@@ -4,7 +4,7 @@ import { Eye, EyeOff, Building2 } from "lucide-react";
 
 const credentials = [
   { label: "Admin", username: "admin", password: "admin123", color: "text-primary" },
-  { label: "Student", username: "student", password: "student123", color: "text-muted-foreground" },
+  { label: "Srijan", username: "240953654", password: "student123", color: "text-muted-foreground" },
 ];
 
 export default function Login() {
@@ -17,7 +17,9 @@ export default function Login() {
   const [stats, setStats] = useState<{
     total_students?: number;
     total_hostels?: number;
-    occupancy_percentage?: number;
+    total_beds?: number;
+    allocated_beds?: number;
+    beds_allocated_percentage?: number;
   } | null>(null);
 
   useEffect(() => {
@@ -90,8 +92,8 @@ export default function Login() {
               label: "Hostels",
             },
             {
-              val: stats?.occupancy_percentage != null ? `${stats.occupancy_percentage}%` : "—",
-              label: "Occupancy",
+              val: stats?.beds_allocated_percentage != null ? `${stats.beds_allocated_percentage}%` : "—",
+              label: "Percentage Allocated",
             },
           ].map((s) => (
             <div key={s.label} className="rounded-md p-4" style={{ backgroundColor: "hsl(220,15%,17%)" }}>

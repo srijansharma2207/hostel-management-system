@@ -26,7 +26,6 @@ const studentLinks = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/my-room", icon: DoorOpen, label: "My Room" },
   { to: "/service-requests", icon: Wrench, label: "My Requests" },
-  { to: "/waiting-list", icon: ClipboardList, label: "Waiting List" },
 ];
 
 interface SidebarProps {

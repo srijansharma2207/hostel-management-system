@@ -147,14 +147,16 @@ export default function Students() {
           Clear
         </button>
 
-        <button
-          onClick={() => setModal(true)}
-          className="flex items-center gap-2 h-9 px-4 rounded-md text-xs font-medium text-white hover:opacity-90 active:scale-[0.98] transition-all ml-auto"
-          style={{ backgroundColor: "hsl(var(--primary))" }}
-        >
-          <UserPlus className="w-3.5 h-3.5" />
-          Add Student
-        </button>
+        {!isAdmin && (
+          <button
+            onClick={() => setModal(true)}
+            className="flex items-center gap-2 h-9 px-4 rounded-md text-xs font-medium text-white hover:opacity-90 active:scale-[0.98] transition-all ml-auto"
+            style={{ backgroundColor: "hsl(var(--primary))" }}
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            Add Student
+          </button>
+        )}
       </div>
 
       <div className="bg-card rounded-lg border border-border shadow-sm overflow-hidden">

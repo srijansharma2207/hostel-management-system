@@ -3,26 +3,130 @@ import { useAuth } from "@/context/AuthContext";
 import { Plus, Search } from "lucide-react";
 
 export default function ServiceRequests() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(false);
   const [requests, setRequests] = useState([]);
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [students, setStudents] = useState<any[]>([]);
+
+  const normalizeRoomNo = (v: any) => {
+    if (v === null || v === undefined) return "";
+    const s = String(v).trim();
+    if (!s) return "";
+    const digits = s.replace(/\D+/g, "");
+    if (!digits) return "";
+    const n = Number(digits);
+    if (!Number.isNaN(n)) return String(n);
+    return digits.replace(/^0+/, "");
+  };
 
   useEffect(() => {
-    // Fetch service requests from backend - would need /service-requests endpoint
-    fetch("http://127.0.0.1:5000/debug-export")
-      .then(res => res.json())
-      .then(data => {
-        // For now, show sample data
-        const sampleRequests = [
-          { id: 1, type: "Plumbing", student: "John Doe", room: "A-101", description: "Leaking faucet", priority: "Medium", date: "2024-01-15", status: "Pending" },
-          { id: 2, type: "Electrical", student: "Jane Smith", room: "B-203", description: "Lights not working", priority: "High", date: "2024-01-16", status: "In Progress" },
-          { id: 3, type: "Cleaning", student: "Mike Johnson", room: "C-305", description: "Room cleaning request", priority: "Low", date: "2024-01-17", status: "Resolved" },
-        ];
-        setRequests(Array.isArray(sampleRequests) ? sampleRequests : []);
-      })
-      .catch(err => console.error(err));
+    fetch("http://127.0.0.1:5000/rooms")
+      .then((res) => res.json())
+      .then((data) => setRooms(Array.isArray(data) ? data : []))
+      .catch(() => setRooms([]));
   }, []);
+
+  useEffect(() => {
+    fetch("http://127.0.0.1:5000/students")
+      .then((res) => res.json())
+      .then((data) => setStudents(Array.isArray(data) ? data : []))
+      .catch(() => setStudents([]));
+  }, []);
+
+  useEffect(() => {
+    const sid = user?.studentId;
+    const url = isAdmin
+      ? "http://127.0.0.1:5000/service-requests"
+      : sid
+        ? `http://127.0.0.1:5000/service-requests?student_id=${encodeURIComponent(sid)}`
+        : "http://127.0.0.1:5000/service-requests?student_id=";
+
+    fetch(url)
+      .then((res) => res.json())
+      .then((data) => {
+        const rows = Array.isArray(data) ? data : [];
+        const mapped = rows.map((r: any) => {
+          const rawId = r?.request_id ?? r?.service_request_id ?? r?.id;
+          const rawType = r?.request_type ?? r?.type;
+          const rawPriority = r?.priority;
+          const rawStatus = r?.status;
+          const rawDate = r?.created_at ?? r?.created_on ?? r?.request_date ?? r?.date_created;
+
+          const studentId = r?.student_id;
+          const studentRow =
+            students.find((s: any) => String(s?.id) === String(studentId)) ??
+            students.find((s: any) => String(s?.student_id) === String(studentId)) ??
+            null;
+
+          const backendRoomRaw = r?.room_no ?? r?.room_number;
+          const backendBlockRaw = r?.block;
+          const backendBlockNoRaw = r?.block_no;
+
+          const roomKeyRaw = backendRoomRaw ?? r?.room_id ?? studentRow?.room;
+          const roomKey = normalizeRoomNo(roomKeyRaw);
+
+          const roomRow =
+            rooms.find((rm: any) => String(rm?.room_id ?? "") === String(r?.room_id ?? "")) ??
+            rooms.find(
+              (rm: any) => normalizeRoomNo(rm?.room_no ?? rm?.room_number ?? rm?.room_num ?? rm?.room ?? "") === roomKey
+            ) ??
+            null;
+
+          const fallbackBlock =
+            studentRow?.block ??
+            studentRow?.block_no ??
+            roomRow?.hostel ??
+            roomRow?.block ??
+            roomRow?.hostel_id ??
+            roomRow?.building ??
+            "—";
+
+          const blockBase = backendBlockRaw ?? backendBlockNoRaw ?? fallbackBlock;
+          const block =
+            blockBase != null && String(blockBase).trim() !== "" && blockBase !== "—"
+              ? String(blockBase)
+              : "—";
+
+          const derivedBlockNo = backendBlockNoRaw ?? studentRow?.block_no;
+          const blockLabel =
+            backendBlockRaw != null && backendBlockRaw !== "" && backendBlockRaw !== "—"
+              ? String(backendBlockRaw)
+              : derivedBlockNo != null && derivedBlockNo !== "" && derivedBlockNo !== "—"
+                ? `Block ${String(derivedBlockNo)}`
+                : block;
+
+          const roomNo =
+            roomRow?.room_no ??
+            roomRow?.room_number ??
+            roomRow?.room_num ??
+            roomRow?.room ??
+            roomKeyRaw ??
+            "—";
+
+          return {
+            id: rawId ?? "—",
+            type: rawType ?? "—",
+            student: studentId ?? "—",
+            block: blockLabel,
+            room: backendRoomRaw ?? roomNo,
+            description: r?.description ?? "—",
+            priority: rawPriority ?? "—",
+            date: rawDate
+              ? (() => {
+                  const d = new Date(rawDate);
+                  if (Number.isNaN(d.getTime())) return String(rawDate);
+                  return d.toLocaleDateString();
+                })()
+              : "—",
+            status: rawStatus ?? "—",
+          };
+        });
+        setRequests(mapped);
+      })
+      .catch(() => setRequests([]));
+  }, [isAdmin, user?.studentId, rooms, students]);
 
   const filteredRequests = useMemo(() => requests.filter((request: any) => 
     String(request.type ?? "").toLowerCase().includes(search.toLowerCase()) ||
@@ -53,14 +157,16 @@ export default function ServiceRequests() {
             className="w-full h-9 pl-9 pr-3 rounded-md border border-border bg-card text-xs outline-none focus:border-primary transition-colors"
           />
         </div>
-        <button
-          onClick={() => setModal(true)}
-          className="flex items-center gap-2 h-9 px-4 rounded-md text-xs font-medium text-white hover:opacity-90 active:scale-[0.98] transition-all ml-auto"
-          style={{ backgroundColor: "hsl(var(--primary))" }}
-        >
-          <Plus className="w-3.5 h-3.5" />
-          New Request
-        </button>
+        {!isAdmin && (
+          <button
+            onClick={() => setModal(true)}
+            className="flex items-center gap-2 h-9 px-4 rounded-md text-xs font-medium text-white hover:opacity-90 active:scale-[0.98] transition-all ml-auto"
+            style={{ backgroundColor: "hsl(var(--primary))" }}
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New Request
+          </button>
+        )}
       </div>
 
       {isAdmin && (
@@ -104,7 +210,11 @@ export default function ServiceRequests() {
                   <tr key={request.id} className="border-b border-border">
                     <td className="px-4 py-3">{request.id}</td>
                     <td className="px-4 py-3">{request.type}</td>
-                    <td className="px-4 py-3">{isAdmin ? `${request.student} / ${request.room}` : request.room}</td>
+                    <td className="px-4 py-3">
+                      {isAdmin
+                        ? `${request.student} / ${request.block}, ${request.room}`
+                        : `${request.block}, ${request.room}`}
+                    </td>
                     <td className="px-4 py-3">{request.description}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 text-xs font-medium rounded ${

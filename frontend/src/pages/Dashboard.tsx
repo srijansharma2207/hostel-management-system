@@ -1,6 +1,6 @@
 import { useAuth } from "@/context/AuthContext";
-import { useEffect, useState } from "react";
-import { Users, BedDouble, Building2, Wrench } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Users, BedDouble, Building2, Wrench, CreditCard } from "lucide-react";
 
 const StatCard = ({
   label,
@@ -41,6 +41,7 @@ export default function Dashboard() {
   } | null>(null);
 
   const [recentAllocations, setRecentAllocations] = useState<any[]>([]);
+  const [highPriorityRequests, setHighPriorityRequests] = useState<any[]>([]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -69,6 +70,18 @@ export default function Dashboard() {
         setRecentAllocations(sorted.slice(0, 8));
       })
       .catch(() => setRecentAllocations([]));
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    fetch("http://127.0.0.1:5000/service-requests?priority=high")
+      .then((res) => res.json())
+      .then((data) => {
+        const rows = Array.isArray(data) ? data : [];
+        setHighPriorityRequests(rows.slice(0, 8));
+      })
+      .catch(() => setHighPriorityRequests([]));
   }, [isAdmin]);
 
   if (!isAdmin) {
@@ -118,7 +131,7 @@ export default function Dashboard() {
         </p>
         <p className="text-xs text-muted-foreground mt-1">
           {stats?.total_beds != null && stats?.allocated_beds != null && stats?.beds_allocated_percentage != null
-            ? `Capacity allocated (occupied beds): ${stats.allocated_beds}/${stats.total_beds} (${stats.beds_allocated_percentage}%)`
+            ? `Capacity allocated: ${stats.allocated_beds}/${stats.total_beds} (${stats.beds_allocated_percentage}%)`
             : "—"}
         </p>
       </div>
@@ -165,18 +178,112 @@ export default function Dashboard() {
         {/* Pending Requests */}
         <div className="bg-card rounded-lg border border-border shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-border">
-            <p className="text-sm font-semibold">Pending Requests</p>
+            <p className="text-sm font-semibold">High Priority Requests</p>
           </div>
-          <div className="flex items-center justify-center py-16 text-xs text-muted-foreground">
-            No requests yet.
-          </div>
+          {highPriorityRequests.length === 0 ? (
+            <div className="flex items-center justify-center py-16 text-xs text-muted-foreground">
+              No requests yet.
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {highPriorityRequests.map((r: any, idx) => (
+                <div key={idx} className="px-5 py-3 text-xs">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="font-medium text-foreground truncate">
+                        {r.request_type ?? r.type ?? "—"}
+                      </p>
+                      <p className="text-muted-foreground truncate mt-0.5">
+                        {r.description ?? "—"}
+                      </p>
+                    </div>
+                    <div className="text-muted-foreground whitespace-nowrap">
+                      {(() => {
+                        const raw = r.created_at ?? r.created_on ?? r.request_date ?? r.date_created;
+                        if (!raw) return "—";
+                        const d = new Date(raw);
+                        if (Number.isNaN(d.getTime())) return String(raw);
+                        return d.toLocaleDateString();
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function StudentDashboard({ user }: { user: ReturnType<typeof useAuth>["user"] }) {
+function StudentDashboard({ user }: { user: ReturnType<typeof useAuth>['user'] }) {
+  const [studentRow, setStudentRow] = useState<any | null>(null);
+  const [rooms, setRooms] = useState<any[]>([]);
+
+  const normalizeRoomNo = (v: any) => {
+    if (v === null || v === undefined) return "";
+    const s = String(v).trim();
+    if (!s) return "";
+    const digits = s.replace(/\D+/g, "");
+    if (!digits) return "";
+    const n = Number(digits);
+    if (!Number.isNaN(n)) return String(n);
+    return digits.replace(/^0+/, "");
+  };
+
+  useEffect(() => {
+    const sid = user?.studentId;
+    if (!sid) {
+      setStudentRow(null);
+      return;
+    }
+
+    fetch("http://127.0.0.1:5000/students")
+      .then((res) => res.json())
+      .then((data) => {
+        const rows = Array.isArray(data) ? data : [];
+        const match = rows.find((r: any) => String(r?.id) === String(sid));
+        setStudentRow(match ?? null);
+      })
+      .catch(() => setStudentRow(null));
+  }, [user?.studentId]);
+
+  useEffect(() => {
+    fetch("http://127.0.0.1:5000/rooms")
+      .then((res) => res.json())
+      .then((data) => setRooms(Array.isArray(data) ? data : []))
+      .catch(() => setRooms([]));
+  }, []);
+
+  const derivedRoom = studentRow?.room ?? user?.roomNo;
+  const derivedBlock = studentRow?.block ?? studentRow?.block_no ?? user?.hostel ?? user?.blockNo;
+  const hasRoom = derivedRoom != null && String(derivedRoom).trim() !== "" && derivedRoom !== "—";
+  const roomLabel = hasRoom ? String(derivedRoom) : "—";
+  const feeValue = user?.fee;
+
+  const roomRow = useMemo(() => {
+    if (!hasRoom) return null;
+    const key = normalizeRoomNo(derivedRoom);
+    return (
+      rooms.find(
+        (r: any) =>
+          normalizeRoomNo(r?.room_no ?? r?.room_number ?? r?.room_num ?? r?.room ?? "") === key
+      ) ?? null
+    );
+  }, [hasRoom, derivedRoom, rooms]);
+
+  const displayBlock =
+    (derivedBlock && derivedBlock !== "—" ? derivedBlock : undefined) ??
+    roomRow?.hostel ??
+    roomRow?.block ??
+    roomRow?.hostel_id ??
+    roomRow?.building ??
+    "—";
+  const displayFloor = roomRow?.floor ?? "—";
+  const displayRoomType = roomRow?.room_type ?? roomRow?.type ?? "—";
+  const displayAc = roomRow?.ac_type ?? roomRow?.ac ?? "—";
+
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       <div className="bg-card rounded-lg border border-border p-5 shadow-sm">
@@ -186,15 +293,23 @@ function StudentDashboard({ user }: { user: ReturnType<typeof useAuth>["user"] }
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total Students" icon={Users} value="—" />
-        <StatCard label="My Room" icon={BedDouble} value="—" />
-        <StatCard label="Fee Due" icon={BedDouble} value="—" />
-        <StatCard label="My Requests" icon={Wrench} value="—" />
+        <StatCard label="My Room" icon={BedDouble} value={hasRoom ? `${displayBlock}, ${roomLabel}` : "—"} />
+        <StatCard label="Fee Due" icon={CreditCard} value={feeValue != null ? feeValue.toLocaleString("en-IN") : "—"} />
       </div>
 
       <div className="bg-card rounded-lg border border-border p-5 shadow-sm">
         <p className="text-sm font-semibold mb-2">My Room Details</p>
-        <p className="text-xs text-muted-foreground">No room assigned yet.</p>
+        {hasRoom ? (
+          <div className="text-xs text-muted-foreground space-y-1">
+            <p>Block: {String(displayBlock)}</p>
+            <p>Room No: {roomLabel}</p>
+            <p>Floor: {String(displayFloor)}</p>
+            <p>Room Type: {String(displayRoomType)}</p>
+            <p>AC: {String(displayAc)}</p>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">No room assigned yet.</p>
+        )}
       </div>
     </div>
   );

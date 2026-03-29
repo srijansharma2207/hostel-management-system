@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
 import { Search, Plus, Filter } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
 
 export default function Rooms() {
+  const { isAdmin } = useAuth();
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(false);
   const [rooms, setRooms] = useState([]);
@@ -146,14 +148,16 @@ export default function Rooms() {
           <Filter className="w-3.5 h-3.5" />
           Filter
         </button>
-        <button
-          onClick={() => setModal(true)}
-          className="flex items-center gap-2 h-9 px-4 rounded-md text-xs font-medium text-white hover:opacity-90 active:scale-[0.98] transition-all ml-auto"
-          style={{ backgroundColor: "hsl(var(--primary))" }}
-        >
-          <Plus className="w-3.5 h-3.5" />
-          Add Room
-        </button>
+        {!isAdmin && (
+          <button
+            onClick={() => setModal(true)}
+            className="flex items-center gap-2 h-9 px-4 rounded-md text-xs font-medium text-white hover:opacity-90 active:scale-[0.98] transition-all ml-auto"
+            style={{ backgroundColor: "hsl(var(--primary))" }}
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add Room
+          </button>
+        )}
       </div>
 
       <div className="bg-card rounded-lg border border-border shadow-sm overflow-hidden">

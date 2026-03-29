@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
 import { Plus, Search } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
 
 export default function Allocations() {
+  const { isAdmin } = useAuth();
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(false);
   const [allocations, setAllocations] = useState([]);
@@ -48,14 +50,16 @@ export default function Allocations() {
             className="w-full h-9 pl-9 pr-3 rounded-md border border-border bg-card text-xs outline-none focus:border-primary transition-colors"
           />
         </div>
-        <button
-          onClick={() => setModal(true)}
-          className="flex items-center gap-2 h-9 px-4 rounded-md text-xs font-medium text-white hover:opacity-90 active:scale-[0.98] transition-all ml-auto"
-          style={{ backgroundColor: "hsl(var(--primary))" }}
-        >
-          <Plus className="w-3.5 h-3.5" />
-          New Allocation
-        </button>
+        {!isAdmin && (
+          <button
+            onClick={() => setModal(true)}
+            className="flex items-center gap-2 h-9 px-4 rounded-md text-xs font-medium text-white hover:opacity-90 active:scale-[0.98] transition-all ml-auto"
+            style={{ backgroundColor: "hsl(var(--primary))" }}
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New Allocation
+          </button>
+        )}
       </div>
 
       <div className="bg-card rounded-lg border border-border shadow-sm overflow-hidden">

@@ -27,21 +27,15 @@ const DEMO_USERS: Record<string, AuthUser & { password: string }> = {
     email: "admin@hostel.edu",
     avatar: "MI",
   },
-  student: {
-    id: "STU2024081",
+  "240953654": {
+    id: "240953654",
     password: "student123",
-    name: "Arjun Sharma",
+    name: "Srijan Sharma",
     role: "student",
-    email: "arjun.sharma@hostel.edu",
-    avatar: "AS",
-    studentId: "STU2024081",
-    roomNo: "204",
-    blockNo: "B-2",
-    hostel: "Tagore Hostel",
-    roomType: "Double Sharing",
-    acType: "Non-AC",
-    fee: 12500,
-    dueDate: "2024-04-05",
+    email: "srijan.sharma@hostel.edu",
+    avatar: "SS",
+    studentId: "240953654",
+    fee: 140000,
   },
 };
 

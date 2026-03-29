@@ -15,6 +15,19 @@ def _table_exists(cursor, table_name: str) -> bool:
     return cursor.fetchone()[0] > 0
 
 
+def _table_or_view_exists(cursor, object_name: str) -> bool:
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM user_objects
+        WHERE object_name = :n
+          AND object_type IN ('TABLE', 'VIEW')
+        """,
+        {"n": object_name.upper()},
+    )
+    return cursor.fetchone()[0] > 0
+
+
 def _get_columns(cursor, table_name: str) -> set:
     cursor.execute(
         """
@@ -56,12 +69,17 @@ def get_students():
         hostel_by_student = {}
         hostel_id_by_student = {}
 
+        room_cols = _get_columns(cursor, "ROOM") if _table_exists(cursor, "ROOM") else set()
+
         if _table_exists(cursor, "ALLOCATION") and _table_exists(cursor, "ROOM"):
             alloc_cols = _get_columns(cursor, "ALLOCATION")
-            room_cols = _get_columns(cursor, "ROOM")
 
             alloc_student_col = "STUDENT_ID" if "STUDENT_ID" in alloc_cols else None
             alloc_room_col = "ROOM_ID" if "ROOM_ID" in alloc_cols else None
+            alloc_id_col = "ALLOCATION_ID" if "ALLOCATION_ID" in alloc_cols else ("ID" if "ID" in alloc_cols else None)
+            alloc_date_col = "ALLOCATION_DATE" if "ALLOCATION_DATE" in alloc_cols else None
+            vacate_col = "VACATE_DATE" if "VACATE_DATE" in alloc_cols else None
+
             room_id_col = "ROOM_ID" if "ROOM_ID" in room_cols else ("ID" if "ID" in room_cols else None)
 
             # Prefer HOSTEL_ID, else try other common columns used as a block/hostel number.
@@ -80,33 +98,6 @@ def get_students():
                     break
 
             if alloc_student_col and alloc_room_col and room_id_col:
-                cursor.execute(f"SELECT {alloc_student_col}, {alloc_room_col} FROM Allocation")
-                alloc_rows = cursor.fetchall()
-                student_to_roomid = {r[0]: r[1] for r in alloc_rows if r[0] is not None and r[1] is not None}
-
-                cursor.execute(
-                    f"SELECT {room_id_col}"
-                    + (f", {room_label_col}" if room_label_col else "")
-                    + (f", {hostel_id_col}" if hostel_id_col else "")
-                    + (f", {block_no_col}" if block_no_col and block_no_col != hostel_id_col else "")
-                    + " FROM Room"
-                )
-                room_rows = cursor.fetchall()
-                roomid_to_roomlabel = {}
-                roomid_to_hostelid = {}
-                roomid_to_blockno = {}
-                for rr in room_rows:
-                    rid = rr[0]
-                    idx = 1
-                    if room_label_col:
-                        roomid_to_roomlabel[rid] = rr[idx]
-                        idx += 1
-                    if hostel_id_col:
-                        roomid_to_hostelid[rid] = rr[idx]
-                        idx += 1
-                    if block_no_col and block_no_col != hostel_id_col:
-                        roomid_to_blockno[rid] = rr[idx]
-
                 hostelid_to_label = {}
                 if _table_exists(cursor, "HOSTEL") and hostel_id_col:
                     hostel_cols = _get_columns(cursor, "HOSTEL")
@@ -120,15 +111,65 @@ def get_students():
                         cursor.execute(f"SELECT {hid_col}, {hlabel_col} FROM Hostel")
                         hostelid_to_label = {h[0]: h[1] for h in cursor.fetchall()}
 
-                for st_id, room_id in student_to_roomid.items():
-                    if room_id in roomid_to_roomlabel:
-                        room_by_student[st_id] = roomid_to_roomlabel[room_id]
-                    if room_id in roomid_to_hostelid:
-                        hostel_id_by_student[st_id] = roomid_to_hostelid[room_id]
-                        if roomid_to_hostelid[room_id] in hostelid_to_label:
-                            hostel_by_student[st_id] = hostelid_to_label[roomid_to_hostelid[room_id]]
-                    elif room_id in roomid_to_blockno:
-                        hostel_id_by_student[st_id] = roomid_to_blockno[room_id]
+                order_parts = []
+                if vacate_col:
+                    order_parts.append(f"CASE WHEN a.{vacate_col} IS NULL THEN 0 ELSE 1 END")
+                if alloc_date_col:
+                    order_parts.append(f"a.{alloc_date_col} DESC NULLS LAST")
+                if alloc_id_col:
+                    order_parts.append(f"a.{alloc_id_col} DESC")
+                if not order_parts:
+                    order_parts.append(f"a.{alloc_room_col} DESC")
+                order_sql = ", ".join(order_parts)
+
+                # Always return some room identifier. Prefer human-friendly room label, else fall back to the ROOM_ID.
+                select_room_label = f"r.{room_label_col}" if room_label_col else f"r.{room_id_col}"
+
+                # Block/hostel identifier: prefer HOSTEL_ID if present.
+                select_hostel_id = f"r.{hostel_id_col}" if hostel_id_col else "NULL"
+
+                # Block number fallback: use the first non-null of block_no_col (if different), else hostel_id.
+                if block_no_col and block_no_col != hostel_id_col:
+                    select_block_no = f"r.{block_no_col}"
+                elif hostel_id_col:
+                    select_block_no = f"r.{hostel_id_col}"
+                else:
+                    select_block_no = "NULL"
+
+                cursor.execute(
+                    f"""
+                    SELECT
+                        student_id,
+                        room_label,
+                        hostel_id,
+                        block_no
+                    FROM (
+                        SELECT
+                            a.{alloc_student_col} AS student_id,
+                            {select_room_label} AS room_label,
+                            {select_hostel_id} AS hostel_id,
+                            {select_block_no} AS block_no,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY a.{alloc_student_col}
+                                ORDER BY {order_sql}
+                            ) AS rn
+                        FROM Allocation a
+                        JOIN Room r ON a.{alloc_room_col} = r.{room_id_col}
+                        WHERE a.{alloc_student_col} IS NOT NULL
+                          AND a.{alloc_room_col} IS NOT NULL
+                    )
+                    WHERE rn = 1
+                    """
+                )
+                for st_id, room_label, hostel_id, block_no in cursor.fetchall():
+                    if room_label is not None:
+                        room_by_student[st_id] = room_label
+                    if hostel_id is not None:
+                        hostel_id_by_student[st_id] = hostel_id
+                        if hostel_id in hostelid_to_label:
+                            hostel_by_student[st_id] = hostelid_to_label[hostel_id]
+                    elif block_no is not None:
+                        hostel_id_by_student[st_id] = block_no
 
         data = []
         for r in rows:
@@ -465,20 +506,36 @@ def get_hostels():
         
         hostel_cols = _get_columns(cursor, "HOSTEL")
         cols_to_select = []
-        for col in ["HOSTEL_ID", "BLOCK_NAME", "HOSTEL_NAME", "NAME", "HOSTEL_NO", "HOSTEL_NUMBER", "CODE", "TYPE", "GENDER", "TOTAL_BLOCKS", "TOTAL_ROOMS", "WARDEN_NAME"]:
+        for col in [
+            "HOSTEL_ID",
+            "BLOCK_NAME",
+            "HOSTEL_NAME",
+            "NAME",
+            "HOSTEL_NO",
+            "HOSTEL_NUMBER",
+            "CODE",
+            "TYPE",
+            "GENDER",
+            "TOTAL_BLOCKS",
+            "TOTAL_ROOMS",
+            "WARDEN_NAME",
+        ]:
             if col in hostel_cols:
                 cols_to_select.append(col)
-        
+ 
+        if not cols_to_select:
+            return jsonify([])
+ 
         cursor.execute(f"SELECT {', '.join(cols_to_select)} FROM Hostel")
         rows = cursor.fetchall()
-        
+ 
         data = []
         for row in rows:
             item = {}
             for i, col in enumerate(cols_to_select):
                 item[col.lower()] = row[i]
             data.append(item)
-        
+ 
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -486,6 +543,215 @@ def get_hostels():
         cursor.close()
         conn.close()
 
+
+# Get service requests
+@app.route("/service-requests")
+def get_service_requests():
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        if not _table_or_view_exists(cursor, "SERVICE_REQUEST"):
+            return jsonify([])
+
+        sr_cols = _get_columns(cursor, "SERVICE_REQUEST")
+
+        cols_to_select = []
+        for col in [
+            "REQUEST_ID",
+            "SERVICE_REQUEST_ID",
+            "ID",
+            "STUDENT_ID",
+            "ROOM_ID",
+            "ROOM_NUMBER",
+            "ROOM_NO",
+            "REQUEST_TYPE",
+            "TYPE",
+            "DESCRIPTION",
+            "PRIORITY",
+            "STATUS",
+            "CREATED_AT",
+            "CREATED_ON",
+            "REQUEST_DATE",
+            "DATE_CREATED",
+        ]:
+            if col in sr_cols and col not in cols_to_select:
+                cols_to_select.append(col)
+
+        if not cols_to_select:
+            return jsonify([])
+
+        where_clauses = []
+        params = {}
+
+        student_id_q = (request.args.get("student_id") or "").strip()
+        if student_id_q and "STUDENT_ID" in sr_cols:
+            where_clauses.append("student_id = :student_id")
+            try:
+                params["student_id"] = int(student_id_q)
+            except:
+                params["student_id"] = student_id_q
+
+        priority_q = (request.args.get("priority") or "").strip().lower()
+        if priority_q and "PRIORITY" in sr_cols:
+            where_clauses.append("UPPER(priority) = :priority")
+            params["priority"] = priority_q.upper()
+
+        status_q = (request.args.get("status") or "").strip().lower()
+        if status_q and "STATUS" in sr_cols:
+            where_clauses.append("UPPER(status) = :status")
+            params["status"] = status_q.upper()
+
+        where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        order_col = None
+        for c in [
+            "CREATED_AT",
+            "CREATED_ON",
+            "REQUEST_DATE",
+            "DATE_CREATED",
+            "REQUEST_ID",
+            "SERVICE_REQUEST_ID",
+            "ID",
+        ]:
+            if c in sr_cols:
+                order_col = c
+                break
+        order_sql = f" ORDER BY {order_col} DESC" if order_col else ""
+
+        cursor.execute(
+            f"SELECT {', '.join(cols_to_select)} FROM Service_Request{where_sql}{order_sql}",
+            params,
+        )
+        rows = cursor.fetchall()
+
+        # Build latest allocation->room mapping keyed by student_id
+        alloc_map = {}
+        if _table_exists(cursor, "ALLOCATION") and _table_exists(cursor, "ROOM") and "STUDENT_ID" in sr_cols:
+            alloc_cols = _get_columns(cursor, "ALLOCATION")
+            room_cols = _get_columns(cursor, "ROOM")
+
+            alloc_student_col = "STUDENT_ID" if "STUDENT_ID" in alloc_cols else None
+            alloc_room_col = "ROOM_ID" if "ROOM_ID" in alloc_cols else None
+            alloc_id_col = "ALLOCATION_ID" if "ALLOCATION_ID" in alloc_cols else ("ID" if "ID" in alloc_cols else None)
+            alloc_date_col = "ALLOCATION_DATE" if "ALLOCATION_DATE" in alloc_cols else None
+            vacate_col = "VACATE_DATE" if "VACATE_DATE" in alloc_cols else None
+
+            room_id_col = "ROOM_ID" if "ROOM_ID" in room_cols else ("ID" if "ID" in room_cols else None)
+
+            room_label_col = None
+            for c in ["ROOM_NUMBER", "ROOM_NO", "ROOM_NUM", "ROOM"]:
+                if c in room_cols:
+                    room_label_col = c
+                    break
+
+            block_no_col = None
+            for c in ["BLOCK", "HOSTEL_ID", "HOSTEL", "BUILDING"]:
+                if c in room_cols:
+                    block_no_col = c
+                    break
+
+            hostel_id_col = "HOSTEL_ID" if "HOSTEL_ID" in room_cols else None
+
+            if alloc_student_col and alloc_room_col and room_id_col:
+                hostelid_to_label = {}
+                if _table_exists(cursor, "HOSTEL") and hostel_id_col:
+                    hostel_cols = _get_columns(cursor, "HOSTEL")
+                    hid_col = "HOSTEL_ID" if "HOSTEL_ID" in hostel_cols else ("ID" if "ID" in hostel_cols else None)
+                    hlabel_col = None
+                    for c in ["HOSTEL_NAME", "NAME", "HOSTEL_NO", "HOSTEL_NUMBER", "HOSTEL"]:
+                        if c in hostel_cols:
+                            hlabel_col = c
+                            break
+                    if hid_col and hlabel_col:
+                        cursor.execute(f"SELECT {hid_col}, {hlabel_col} FROM Hostel")
+                        hostelid_to_label = {h[0]: h[1] for h in cursor.fetchall()}
+
+                order_parts = []
+                if vacate_col:
+                    order_parts.append(f"CASE WHEN a.{vacate_col} IS NULL THEN 0 ELSE 1 END")
+                if alloc_date_col:
+                    order_parts.append(f"a.{alloc_date_col} DESC NULLS LAST")
+                if alloc_id_col:
+                    order_parts.append(f"a.{alloc_id_col} DESC")
+                if not order_parts:
+                    order_parts.append(f"a.{alloc_room_col} DESC")
+                order_sql2 = ", ".join(order_parts)
+
+                select_room_label = f"r.{room_label_col}" if room_label_col else f"r.{room_id_col}"
+                select_hostel_id = f"r.{hostel_id_col}" if hostel_id_col else "NULL"
+                if block_no_col and block_no_col != hostel_id_col:
+                    select_block_no = f"r.{block_no_col}"
+                elif hostel_id_col:
+                    select_block_no = f"r.{hostel_id_col}"
+                else:
+                    select_block_no = "NULL"
+
+                cursor.execute(
+                    f"""
+                    SELECT
+                        student_id,
+                        room_label,
+                        hostel_id,
+                        block_no
+                    FROM (
+                        SELECT
+                            a.{alloc_student_col} AS student_id,
+                            {select_room_label} AS room_label,
+                            {select_hostel_id} AS hostel_id,
+                            {select_block_no} AS block_no,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY a.{alloc_student_col}
+                                ORDER BY {order_sql2}
+                            ) AS rn
+                        FROM Allocation a
+                        JOIN Room r ON a.{alloc_room_col} = r.{room_id_col}
+                        WHERE a.{alloc_student_col} IS NOT NULL
+                          AND a.{alloc_room_col} IS NOT NULL
+                    )
+                    WHERE rn = 1
+                    """
+                )
+                for st_id, room_label, hostel_id, block_no in cursor.fetchall():
+                    actual_block_no = block_no if block_no is not None else hostel_id
+                    block_label = hostelid_to_label.get(hostel_id) if hostel_id is not None else str(block_no) if block_no is not None else None
+                    if block_label and isinstance(block_label, str):
+                        block_label = block_label.replace("Block", "").strip()
+                    
+                    alloc_map[st_id] = {
+                        "room_no": room_label,
+                        "block_no": actual_block_no,
+                        "block": block_label,
+                    }
+
+        data = []
+        for row in rows:
+            item = {}
+            for i, col in enumerate(cols_to_select):
+                item[col.lower()] = row[i]
+
+            st_id = item.get("student_id")
+            if st_id in alloc_map:
+                # Always populate room_no from allocation if it exists
+                if not item.get("room_no") or item.get("room_no") in (None, "", "—"):
+                    item["room_no"] = alloc_map[st_id].get("room_no")
+                # Always populate block_no from allocation if it exists  
+                if not item.get("block_no") or item.get("block_no") in (None, "", "—"):
+                    item["block_no"] = alloc_map[st_id].get("block_no")
+                # Always populate block from allocation if it exists
+                if not item.get("block") or item.get("block") in (None, "", "—"):
+                    item["block"] = alloc_map[st_id].get("block")
+
+            data.append(item)
+
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# Get allocations
 @app.route("/allocations")
 def get_allocations():
     conn = get_connection()
@@ -503,23 +769,14 @@ def get_allocations():
         alloc_student_col = "STUDENT_ID" if "STUDENT_ID" in alloc_cols else None
         alloc_room_col = "ROOM_ID" if "ROOM_ID" in alloc_cols else None
 
-        alloc_date_col = None
-        for c in ["ALLOCATION_DATE", "ALLOCATED_ON", "ALLOCATION", "ALLOCATIO"]:
-            if c in alloc_cols:
-                alloc_date_col = c
-                break
+        alloc_date_col = "ALLOCATION_DATE" if "ALLOCATION_DATE" in alloc_cols else None
+        vacate_date_col = "VACATE_DATE" if "VACATE_DATE" in alloc_cols else None
 
-        vacate_date_col = None
-        for c in ["VACATE_DATE", "VACATE_ON", "VACATE_DA"]:
-            if c in alloc_cols:
-                vacate_date_col = c
-                break
-
-        select_cols = [c for c in [alloc_id_col, alloc_student_col, alloc_room_col, alloc_date_col, vacate_date_col] if c]
         if not alloc_student_col or not alloc_room_col:
             return jsonify([])
 
-        cursor.execute(f"SELECT {', '.join(select_cols)} FROM ALLOCATION")
+        select_cols = [c for c in [alloc_id_col, alloc_student_col, alloc_room_col, alloc_date_col, vacate_date_col] if c]
+        cursor.execute(f"SELECT {', '.join(select_cols)} FROM Allocation")
         alloc_rows = cursor.fetchall()
 
         # Student lookup
@@ -532,10 +789,10 @@ def get_allocations():
         if sid_col:
             stud_select_cols = [c for c in [sid_col, fn_col, ln_col, name_col] if c]
             if stud_select_cols:
-                cursor.execute(f"SELECT {', '.join(stud_select_cols)} FROM STUDENT")
+                cursor.execute(f"SELECT {', '.join(stud_select_cols)} FROM Student")
                 for row in cursor.fetchall():
                     row_map = dict(zip(stud_select_cols, row))
-                    sid = row_map.get(sid_col)
+                    s_id = row_map.get(sid_col)
                     full_name = ""
                     if name_col and row_map.get(name_col):
                         full_name = str(row_map.get(name_col))
@@ -543,7 +800,7 @@ def get_allocations():
                         full_name = f"{row_map.get(fn_col, '')} {row_map.get(ln_col, '')}".strip()
                     elif fn_col:
                         full_name = str(row_map.get(fn_col, ""))
-                    students_by_id[sid] = full_name
+                    students_by_id[s_id] = full_name
 
         # Room lookup
         room_id_col = "ROOM_ID" if "ROOM_ID" in room_cols else ("ID" if "ID" in room_cols else None)
@@ -554,7 +811,7 @@ def get_allocations():
                 room_label_col = c
                 break
 
-        room_by_id = {}
+        room_no_by_id = {}
         hostel_id_by_room_id = {}
         if room_id_col:
             r_select = [room_id_col]
@@ -562,12 +819,12 @@ def get_allocations():
                 r_select.append(room_label_col)
             if hostel_id_col:
                 r_select.append(hostel_id_col)
-            cursor.execute(f"SELECT {', '.join(r_select)} FROM ROOM")
+            cursor.execute(f"SELECT {', '.join(r_select)} FROM Room")
             for rr in cursor.fetchall():
                 rid = rr[0]
                 idx = 1
                 if room_label_col:
-                    room_by_id[rid] = rr[idx]
+                    room_no_by_id[rid] = rr[idx]
                     idx += 1
                 if hostel_id_col:
                     hostel_id_by_room_id[rid] = rr[idx]
@@ -581,7 +838,7 @@ def get_allocations():
                 hlabel_col = c
                 break
         if hid_col and hlabel_col:
-            cursor.execute(f"SELECT {hid_col}, {hlabel_col} FROM HOSTEL")
+            cursor.execute(f"SELECT {hid_col}, {hlabel_col} FROM Hostel")
             hostel_by_id = {r[0]: r[1] for r in cursor.fetchall()}
 
         data = []
@@ -591,17 +848,19 @@ def get_allocations():
             room_id = row_map.get(alloc_room_col)
             hostel_id = hostel_id_by_room_id.get(room_id)
 
-            data.append({
-                "allocation_id": row_map.get(alloc_id_col) if alloc_id_col else None,
-                "student_id": student_id,
-                "room_id": room_id,
-                "allocation_date": row_map.get(alloc_date_col) if alloc_date_col else None,
-                "vacate_date": row_map.get(vacate_date_col) if vacate_date_col else None,
-                "student_name": students_by_id.get(student_id, "—"),
-                "room_no": room_by_id.get(room_id, "—"),
-                "hostel_id": hostel_id,
-                "hostel": hostel_by_id.get(hostel_id, "—") if hostel_id is not None else "—",
-            })
+            data.append(
+                {
+                    "allocation_id": row_map.get(alloc_id_col) if alloc_id_col else None,
+                    "student_id": student_id,
+                    "room_id": room_id,
+                    "allocation_date": row_map.get(alloc_date_col) if alloc_date_col else None,
+                    "vacate_date": row_map.get(vacate_date_col) if vacate_date_col else None,
+                    "student_name": students_by_id.get(student_id, "—"),
+                    "room_no": room_no_by_id.get(room_id, "—"),
+                    "hostel_id": hostel_id,
+                    "hostel": hostel_by_id.get(hostel_id, "—") if hostel_id is not None else "—",
+                }
+            )
 
         return jsonify(data)
     except Exception as e:
@@ -619,7 +878,7 @@ def get_rooms():
     try:
         if not _table_exists(cursor, "ROOM"):
             return jsonify([])
-        
+
         room_cols = _get_columns(cursor, "ROOM")
         cols_to_select = []
         for col in [
@@ -644,17 +903,17 @@ def get_rooms():
         ]:
             if col in room_cols:
                 cols_to_select.append(col)
-        
+
         cursor.execute(f"SELECT {', '.join(cols_to_select)} FROM Room")
         rows = cursor.fetchall()
-        
+
         data = []
         for row in rows:
             item = {}
             for i, col in enumerate(cols_to_select):
                 item[col.lower()] = row[i]
             data.append(item)
-        
+
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -669,7 +928,6 @@ def get_waiting_list():
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        # Prefer WAITING_APPLICATION (your DB has 500 rows here), fall back to WAITING_LIST.
         if _table_exists(cursor, "WAITING_APPLICATION"):
             wa_cols = _get_columns(cursor, "WAITING_APPLICATION")
 
@@ -697,7 +955,6 @@ def get_waiting_list():
                         "waiting_id": row_map.get("WAITING_ID"),
                     }
                 )
-
             return jsonify(data)
 
         if not _table_exists(cursor, "WAITING_LIST"):
@@ -720,7 +977,6 @@ def get_waiting_list():
             if col in wl_cols:
                 cols_to_select.append(col)
 
-        # Pick an available date column for ordering.
         order_col = None
         for c in ["APPLIED_ON", "REQUEST_DATE"]:
             if c in wl_cols:
@@ -731,8 +987,8 @@ def get_waiting_list():
                 if c in wl_cols:
                     order_col = c
                     break
-
         order_sql = f" ORDER BY {order_col} DESC" if order_col else ""
+
         cursor.execute(f"SELECT {', '.join(cols_to_select)} FROM Waiting_List{order_sql}")
         rows = cursor.fetchall()
 
@@ -777,12 +1033,15 @@ def debug_export():
                 if count > 0:
                     cursor.execute(f"SELECT * FROM {table} WHERE ROWNUM <= 3")
                     sample_rows = cursor.fetchall()
-                    cursor.execute(f"""
+                    cursor.execute(
+                        """
                         SELECT column_name 
                         FROM user_tab_columns 
                         WHERE table_name = :t 
                         ORDER BY column_id
-                    """, {"t": table})
+                        """,
+                        {"t": table},
+                    )
                     columns = [row[0] for row in cursor.fetchall()]
                     result[table]["columns"] = columns
                     result[table]["sample_rows"] = sample_rows
